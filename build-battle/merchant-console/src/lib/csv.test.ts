@@ -4,6 +4,7 @@ import {
   DEFAULT_EXPORT_COLUMNS,
   EXPORT_COLUMNS,
   exportFilename,
+  exportLabel,
   parseColumns,
   toCsv,
 } from "./csv"
@@ -32,7 +33,19 @@ describe("toCsv", () => {
   it("writes a header row followed by one row per payment", () => {
     const lines = toCsv([payment]).split("\n")
     expect(lines).toHaveLength(2)
-    expect(lines[0]).toBe(EXPORT_COLUMNS.join(","))
+    expect(lines[0]).toBe(DEFAULT_EXPORT_COLUMNS.join(","))
+  })
+
+  it("leaves the card last four out when no columns are given", () => {
+    const csv = toCsv([payment])
+    expect(csv.split("\n")[0]).not.toContain("last4")
+    expect(csv).not.toContain("4242")
+  })
+
+  it("still writes every column, last four included, when asked for all of them", () => {
+    expect(toCsv([payment], EXPORT_COLUMNS).split("\n")[0]).toBe(
+      EXPORT_COLUMNS.join(","),
+    )
   })
 
   it("writes only the requested columns, in the order given", () => {
@@ -141,10 +154,59 @@ describe("column selection", () => {
     expect(selection.error).toContain("password")
   })
 
+  it("ignores a trailing or doubled comma instead of calling it a column", () => {
+    expect(parseColumns("id,amount,")).toEqual({
+      ok: true,
+      columns: ["id", "amount"],
+    })
+    expect(parseColumns("id,,amount")).toEqual({
+      ok: true,
+      columns: ["id", "amount"],
+    })
+  })
+
+  it("treats a selection of only commas as empty", () => {
+    expect(parseColumns(",,")).toEqual({
+      ok: false,
+      error: "Select at least one column.",
+    })
+  })
+
   it("drops repeated columns and keeps the first position", () => {
     expect(parseColumns("id,amount,id")).toEqual({
       ok: true,
       columns: ["id", "amount"],
     })
+  })
+})
+
+describe("exportLabel", () => {
+  it("names the status when one is filtered on", () => {
+    expect(exportLabel("filter", { status: "disputed" })).toBe("disputed")
+  })
+
+  it("keeps the status even when other filters narrow it further", () => {
+    expect(
+      exportLabel("filter", { status: "disputed", merchantId: "mch_01" }),
+    ).toBe("disputed")
+  })
+
+  it("says filtered when other filters narrow an unfiltered status", () => {
+    expect(exportLabel("filter", { status: "all", search: "coffee" })).toBe(
+      "filtered",
+    )
+    expect(exportLabel("filter", { merchantId: "mch_01" })).toBe("filtered")
+    expect(exportLabel("filter", { from: "2026-08-01T00:00:00.000Z" })).toBe(
+      "filtered",
+    )
+  })
+
+  it("says all when nothing narrows the filter scope", () => {
+    expect(exportLabel("filter", { status: "all" })).toBe("all")
+    expect(exportLabel("filter", {})).toBe("all")
+  })
+
+  it("says all for the all-payments scope, whatever the filters were", () => {
+    expect(exportLabel("all", { status: "disputed", search: "x" })).toBe("all")
   })
 })

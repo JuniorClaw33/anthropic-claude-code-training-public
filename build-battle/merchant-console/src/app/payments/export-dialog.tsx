@@ -11,7 +11,11 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/Drawer"
-import type { ExportColumn } from "@/lib/csv"
+import {
+  DEFAULT_EXPORT_COLUMNS,
+  EXPORT_COLUMNS,
+  type ExportColumn,
+} from "@/lib/exportColumns"
 import { Download } from "lucide-react"
 import { useState } from "react"
 
@@ -33,11 +37,6 @@ const COLUMN_LABELS: Record<ExportColumn, string> = {
   currency: "Currency",
 }
 
-const COLUMNS = Object.keys(COLUMN_LABELS) as ExportColumn[]
-
-/** Card last four is opt-in: a file for a merchant should not carry it by accident. */
-const DEFAULT_SELECTED = COLUMNS.filter((column) => column !== "last4")
-
 type Scope = "filter" | "all"
 
 export function ExportDialog({
@@ -51,7 +50,7 @@ export function ExportDialog({
   allCount: number
 }) {
   const [open, setOpen] = useState(false)
-  const [selected, setSelected] = useState<ExportColumn[]>(DEFAULT_SELECTED)
+  const [selected, setSelected] = useState<ExportColumn[]>([...DEFAULT_EXPORT_COLUMNS])
   const [scope, setScope] = useState<Scope>("filter")
 
   const toggle = (column: ExportColumn, checked: boolean) =>
@@ -66,7 +65,7 @@ export function ExportDialog({
     const params = new URLSearchParams(scope === "filter" ? filterQuery : "")
     params.set("scope", scope)
     // Keep the order the columns are listed in, not the order they were ticked.
-    params.set("columns", COLUMNS.filter((c) => selected.includes(c)).join(","))
+    params.set("columns", EXPORT_COLUMNS.filter((c) => selected.includes(c)).join(","))
     return `/api/payments/export?${params.toString()}`
   }
 
@@ -128,7 +127,7 @@ export function ExportDialog({
               Columns
             </legend>
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {COLUMNS.map((column) => (
+              {EXPORT_COLUMNS.map((column) => (
                 <label
                   key={column}
                   className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"

@@ -1,36 +1,21 @@
 import { merchantById } from "@/data/merchants"
-import { Payment } from "@/data/types"
+import { Payment, PaymentFilters } from "@/data/types"
+import {
+  DEFAULT_EXPORT_COLUMNS,
+  EXPORT_COLUMNS,
+  type ExportColumn,
+} from "./exportColumns"
 import { formatMoney } from "./money"
 
 /**
  * CSV export for the payments table.
  *
- * The column set is fixed. Ops has asked for control over it — that is
- * NWP-101 — but today everyone gets every column, including the card
- * last four, whether or not the file is going to a merchant.
+ * Ops chooses the columns. The column list itself lives in `exportColumns.ts`
+ * so the export panel can share it; it is re-exported here so everything the
+ * export needs can still be imported from one place.
  */
 
-export const EXPORT_COLUMNS = [
-  "id",
-  "created_at",
-  "merchant",
-  "description",
-  "status",
-  "method",
-  "card_brand",
-  "last4",
-  "amount",
-  "currency",
-] as const
-
-export type ExportColumn = (typeof EXPORT_COLUMNS)[number]
-
-/**
- * What ships when the caller does not choose. The card last four is left out:
- * a file handed to a merchant should not carry it unless someone opts in.
- */
-export const DEFAULT_EXPORT_COLUMNS: readonly ExportColumn[] =
-  EXPORT_COLUMNS.filter((column) => column !== "last4")
+export { DEFAULT_EXPORT_COLUMNS, EXPORT_COLUMNS, type ExportColumn }
 
 export type ColumnSelection =
   | { ok: true; columns: ExportColumn[] }
@@ -52,7 +37,14 @@ export function parseColumns(param: string | null | undefined): ColumnSelection 
     return { ok: false, error: "Select at least one column." }
   }
 
-  const requested = param.split(",").map((name) => name.trim())
+  // A stray or doubled comma is not a column name, so it is ignored.
+  const requested = param
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "")
+  if (requested.length === 0) {
+    return { ok: false, error: "Select at least one column." }
+  }
   const unknown = requested.filter(
     (name) => !(EXPORT_COLUMNS as readonly string[]).includes(name),
   )
@@ -99,13 +91,35 @@ function cell(payment: Payment, column: ExportColumn): string {
 
 export function toCsv(
   payments: Payment[],
-  columns: readonly ExportColumn[] = EXPORT_COLUMNS,
+  columns: readonly ExportColumn[] = DEFAULT_EXPORT_COLUMNS,
 ): string {
   const header = columns.join(",")
   const rows = payments.map((payment) =>
     columns.map((column) => escapeCell(cell(payment, column))).join(","),
   )
   return [header, ...rows].join("\n")
+}
+
+export type ExportScope = "filter" | "all"
+
+/**
+ * Names what an export covers, for the filename: the status when one is
+ * filtered on, `filtered` when other filters narrow it, otherwise `all`.
+ * Every value returned is a fixed word or an allowlisted status.
+ */
+export function exportLabel(
+  scope: ExportScope,
+  filters: Pick<
+    PaymentFilters,
+    "status" | "merchantId" | "search" | "from" | "to"
+  >,
+): string {
+  if (scope === "all") return "all"
+  if (filters.status && filters.status !== "all") return filters.status
+  const narrowed = Boolean(
+    filters.merchantId || filters.search || filters.from || filters.to,
+  )
+  return narrowed ? "filtered" : "all"
 }
 
 /**

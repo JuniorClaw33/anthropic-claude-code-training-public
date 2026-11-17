@@ -69,6 +69,11 @@ export function filterPayments(filters: PaymentFilters): Payment[] {
   })
 }
 
+/** How many payments exist, without building a filtered copy. */
+export function countPayments() {
+  return store.payments.length
+}
+
 export function sortPayments(
   payments: Payment[],
   sort: PaymentFilters["sort"] = "createdAt",

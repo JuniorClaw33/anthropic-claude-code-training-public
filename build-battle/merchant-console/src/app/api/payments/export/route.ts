@@ -1,8 +1,18 @@
 import { filterPayments, parseFilters, sortPayments } from "@/data/queries"
-import { exportFilename, parseColumns, toCsv } from "@/lib/csv"
+import {
+  type ExportScope,
+  exportFilename,
+  exportLabel,
+  parseColumns,
+  toCsv,
+} from "@/lib/csv"
 import { NextRequest, NextResponse } from "next/server"
 
-const SCOPES = ["filter", "all"] as const
+const SCOPES: readonly ExportScope[] = ["filter", "all"]
+
+function isScope(value: string): value is ExportScope {
+  return (SCOPES as readonly string[]).includes(value)
+}
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -27,9 +37,7 @@ export function GET(request: NextRequest) {
   if (!selection.ok) return badRequest(selection.error)
 
   const scope = params.get("scope") ?? "filter"
-  if (!(SCOPES as readonly string[]).includes(scope)) {
-    return badRequest("Scope must be filter or all.")
-  }
+  if (!isScope(scope)) return badRequest("Scope must be filter or all.")
 
   const filters = parseFilters(
     scope === "all" ? new URLSearchParams() : params,
@@ -40,23 +48,10 @@ export function GET(request: NextRequest) {
     filters.direction,
   )
 
-  // The label names the scope. Every part of it is an allowlisted value.
-  const narrowed = Boolean(
-    filters.merchantId || filters.search || filters.from || filters.to,
-  )
-  const label =
-    scope === "all"
-      ? "all"
-      : filters.status && filters.status !== "all"
-        ? filters.status
-        : narrowed
-          ? "filtered"
-          : "all"
-
   return new Response(toCsv(rows, selection.columns), {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="${exportFilename(new Date(), label)}"`,
+      "content-disposition": `attachment; filename="${exportFilename(new Date(), exportLabel(scope, filters))}"`,
     },
   })
 }

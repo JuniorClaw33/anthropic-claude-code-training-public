@@ -10,7 +10,7 @@ import {
 } from "@/components/Table"
 import { StatusBadge } from "@/components/ui/payments/StatusBadge"
 import { merchantById, merchants } from "@/data/merchants"
-import { filterPayments, queryPayments } from "@/data/queries"
+import { countPayments, queryPayments } from "@/data/queries"
 import { PaymentFilters, PaymentStatus } from "@/data/types"
 import { formatDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
@@ -47,10 +47,15 @@ export default async function PaymentsPage({
     Object.entries(params).filter(([, v]) => Boolean(v)) as [string, string][],
   )
 
-  // The export dialog builds its own link, so it gets the filters without page.
-  const filterQuery = new URLSearchParams(query)
-  filterQuery.delete("page")
-  const allCount = filterPayments({}).length
+  // The export link carries only the filters this page applies, so the row
+  // count shown in the panel is the number of rows in the file.
+  const filterQuery = new URLSearchParams()
+  if (filters.status && filters.status !== "all") {
+    filterQuery.set("status", filters.status)
+  }
+  if (filters.merchantId) filterQuery.set("merchantId", filters.merchantId)
+  if (filters.search) filterQuery.set("search", filters.search)
+  const allCount = countPayments()
 
   const pageHref = (next: number) => {
     const q = new URLSearchParams(query)
