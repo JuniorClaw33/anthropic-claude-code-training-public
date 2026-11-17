@@ -10,14 +10,21 @@ import {
 } from "@/components/Table"
 import { StatusBadge } from "@/components/ui/payments/StatusBadge"
 import { merchantById, merchants } from "@/data/merchants"
-import { countPayments, queryPayments } from "@/data/queries"
-import { PaymentFilters, PaymentStatus } from "@/data/types"
+import {
+  countPayments,
+  filtersToParams,
+  parseFilters,
+  queryPayments,
+} from "@/data/queries"
+import { PaymentStatus } from "@/data/types"
 import { formatDate } from "@/lib/dates"
 import { formatMoney } from "@/lib/money"
 import Link from "next/link"
 import { ExportDialog } from "./export-dialog"
 import { PaymentsFilterBar } from "./filter-bar"
 
+// The order the status dropdown lists them in. Validation of the URL value is
+// parseFilters' job, not this list's.
 const STATUSES: (PaymentStatus | "all")[] = [
   "all",
   "captured",
@@ -33,28 +40,18 @@ export default async function PaymentsPage({
   searchParams: Promise<Record<string, string | undefined>>
 }) {
   const params = await searchParams
-  const filters: PaymentFilters = {
-    status: (STATUSES.includes(params.status as PaymentStatus)
-      ? params.status
-      : "all") as PaymentFilters["status"],
-    merchantId: params.merchantId || undefined,
-    search: params.search || undefined,
-    page: Number(params.page ?? "1") || 1,
-  }
-
-  const { rows, total, page, pageCount } = queryPayments(filters)
   const query = new URLSearchParams(
     Object.entries(params).filter(([, v]) => Boolean(v)) as [string, string][],
   )
 
-  // The export link carries only the filters this page applies, so the row
-  // count shown in the panel is the number of rows in the file.
-  const filterQuery = new URLSearchParams()
-  if (filters.status && filters.status !== "all") {
-    filterQuery.set("status", filters.status)
-  }
-  if (filters.merchantId) filterQuery.set("merchantId", filters.merchantId)
-  if (filters.search) filterQuery.set("search", filters.search)
+  // The same parser the API routes use, so the table, the row count and the
+  // export all read the URL one way.
+  const filters = parseFilters(query)
+  const { rows, total, page, pageCount } = queryPayments(filters)
+
+  // The export link carries the filters just parsed, so the row count shown
+  // in the panel is the number of rows in the file.
+  const filterQuery = filtersToParams(filters)
   const allCount = countPayments()
 
   const pageHref = (next: number) => {
