@@ -74,6 +74,8 @@ export interface Payout {
 export interface PaymentFilters {
   status?: PaymentStatus | "all"
   merchantId?: string
+  /** Narrow to one currency. Internal: it is not read from the client. */
+  currency?: Currency
   search?: string
   from?: string
   to?: string

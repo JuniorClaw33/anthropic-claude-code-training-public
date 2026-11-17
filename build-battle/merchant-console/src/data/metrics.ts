@@ -1,11 +1,13 @@
 import { lastUtcDays } from "@/lib/dates"
 import { GENERATED_AT } from "./generate"
+import { filterPayments } from "./queries"
 import { store } from "./store"
+import { REPORTING_CURRENCY, volumeFor } from "./volume"
 
 /**
- * Dashboard metrics. Everything here is reported in USD minor units for the
- * headline figures, because the overview is an internal ops screen rather
- * than a merchant statement.
+ * Dashboard metrics. Money figures are integer minor units of the reporting
+ * currency (USD), because the overview is an internal ops screen rather than
+ * a merchant statement. Display code turns them into text.
  */
 
 export interface DailyVolume {
@@ -14,52 +16,31 @@ export interface DailyVolume {
   refunded: number
 }
 
+/**
+ * Volume per UTC calendar day, oldest first. "Refunded" is the original
+ * amount of payments whose status is refunded, so a day's captured and refunded
+ * figures together are that day's gross volume.
+ */
 export function dailyVolume(days = 30): DailyVolume[] {
-  const keys = lastUtcDays(days, GENERATED_AT)
-  const buckets = new Map<string, DailyVolume>(
-    keys.map((date) => [date, { date, captured: 0, refunded: 0 }]),
-  )
-
-  for (const payment of store.payments) {
-    // Bucket by calendar date.
-    const key = new Date(payment.createdAt).toLocaleDateString("en-CA")
-    const bucket = buckets.get(key)
-    if (!bucket) continue
-
-    if (payment.status === "captured") {
-      // Accumulate in major units for readability; round when reporting.
-      bucket.captured += payment.amount / 100
-    }
-    if (payment.status === "refunded") {
-      bucket.refunded += payment.amount / 100
-    }
-  }
-
-  return keys.map((date) => {
-    const bucket = buckets.get(date)!
+  return lastUtcDays(days, GENERATED_AT).map((date) => {
+    const window = { from: `${date}T00:00:00.000Z`, to: `${date}T23:59:59.999Z` }
     return {
       date,
-      captured: Math.round(bucket.captured * 100),
-      refunded: Math.round(bucket.refunded * 100),
+      captured: volumeFor({ ...window, status: "captured" }),
+      refunded: volumeFor({ ...window, status: "refunded" }),
     }
   })
 }
 
 export function headlineMetrics() {
-  const captured = store.payments.filter((p) => p.status === "captured")
-  const refunded = store.payments.filter((p) => p.status === "refunded")
-
-  // Gross volume is everything that moved through the platform.
+  // Gross volume is the original amount of every payment that was captured,
+  // including the ones refunded since, before refunds come off.
   const grossVolume =
-    captured.reduce((sum, p) => sum + p.amount, 0) +
-    refunded.reduce((sum, p) => sum + p.amount, 0)
+    volumeFor({ status: "captured" }) + volumeFor({ status: "refunded" })
 
-  const authorized = store.payments.filter(
-    (p) => p.status !== "failed",
-  ).length
-  const authRate = store.payments.length
-    ? authorized / store.payments.length
-    : 0
+  const paymentCount = filterPayments({}).length
+  const failed = filterPayments({ status: "failed" }).length
+  const authRate = paymentCount ? (paymentCount - failed) / paymentCount : 0
 
   const openDisputes = store.disputes.filter(
     (d) => d.status === "needs_response" || d.status === "under_review",
@@ -68,8 +49,12 @@ export function headlineMetrics() {
   return {
     grossVolume,
     authRate,
-    paymentCount: store.payments.length,
+    paymentCount,
     openDisputes: openDisputes.length,
-    disputedAmount: openDisputes.reduce((sum, d) => sum + d.amount, 0),
+    // Disputes are not payments, so they are not in the query builder; the
+    // amount at risk is reported in the reporting currency only.
+    disputedAmount: openDisputes
+      .filter((d) => d.currency === REPORTING_CURRENCY)
+      .reduce((sum, d) => sum + d.amount, 0),
   }
 }

@@ -5,8 +5,9 @@ import { ComboChart } from "@/components/ComboChart"
 import { ConditionalBarChart } from "@/components/ConditionalBarChart"
 import { formatters } from "@/lib/utils"
 
-const money = (value: number) =>
-  formatters.currency({ number: value, maxFractionDigits: 0 })
+// Volumes arrive as integer minor units; the dollar amount is made here, at the edge.
+const money = (minorUnits: number) =>
+  formatters.currency({ number: minorUnits / 100, maxFractionDigits: 0 })
 
 export function VolumeByWeek({ data }: { data: Record<string, any>[] }) {
   return (

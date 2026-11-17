@@ -14,8 +14,9 @@ export function VolumeChart({
       index="date"
       categories={["Captured", "Refunded"]}
       colors={["blue", "gray"]}
-      valueFormatter={(value: number) =>
-        `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+      // The data is integer minor units; the dollar amount is made here, at the edge.
+      valueFormatter={(minorUnits: number) =>
+        `$${(minorUnits / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
       }
       yAxisWidth={64}
       showLegend

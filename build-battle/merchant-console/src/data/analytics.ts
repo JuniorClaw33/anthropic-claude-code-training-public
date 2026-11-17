@@ -1,6 +1,8 @@
 import { GENERATED_AT } from "./generate"
 import { merchants } from "./merchants"
+import { filterPayments } from "./queries"
 import { store } from "./store"
+import { volumeFor } from "./volume"
 
 /**
  * Weekly rollups for the monitoring dashboard. Buckets are UTC weeks ending
@@ -34,10 +36,11 @@ export function weeks(count = 12): WeekBucket[] {
   return buckets
 }
 
-const inWeek = (iso: string, week: WeekBucket) => {
-  const at = new Date(iso).getTime()
-  return at >= week.start && at < week.end
-}
+/** The query-builder bounds for a week: `start` up to, but not including, `end`. */
+const windowOf = (week: WeekBucket) => ({
+  from: new Date(week.start).toISOString(),
+  to: new Date(week.end - 1).toISOString(),
+})
 
 /** Captured volume this period against the period before it. */
 export function volumeByWeek(count = 12) {
@@ -48,54 +51,43 @@ export function volumeByWeek(count = 12) {
       start: week.start - count * WEEK_MS,
       end: week.end - count * WEEK_MS,
     }
-    const sum = (bucket: WeekBucket) =>
-      store.payments
-        .filter((p) => p.status === "captured" && inWeek(p.createdAt, bucket))
-        .reduce((total, p) => total + p.amount, 0) / 100
-
     return {
       date: week.date,
-      "This period": Math.round(sum(week)),
-      "Previous period": Math.round(sum(previous)),
+      "This period": volumeFor({ ...windowOf(week), status: "captured" }),
+      "Previous period": volumeFor({ ...windowOf(previous), status: "captured" }),
     }
   })
 }
 
 /** Payment count against captured volume, for the biaxial chart. */
 export function countAndVolumeByWeek(count = 12) {
-  return weeks(count).map((week) => {
-    const inBucket = store.payments.filter((p) => inWeek(p.createdAt, week))
-    const captured = inBucket.filter((p) => p.status === "captured")
-    return {
-      date: week.date,
-      Payments: inBucket.length,
-      "Captured volume": Math.round(
-        captured.reduce((total, p) => total + p.amount, 0) / 100,
-      ),
-    }
-  })
+  return weeks(count).map((week) => ({
+    date: week.date,
+    Payments: filterPayments(windowOf(week)).length,
+    "Captured volume": volumeFor({ ...windowOf(week), status: "captured" }),
+  }))
 }
 
 /** Approved against failed, rendered as a percentage stack. */
 export function authorizationByWeek(count = 12) {
   return weeks(count).map((week) => {
-    const inBucket = store.payments.filter((p) => inWeek(p.createdAt, week))
-    return {
-      date: week.date,
-      Approved: inBucket.filter((p) => p.status !== "failed").length,
-      Failed: inBucket.filter((p) => p.status === "failed").length,
-    }
+    const total = filterPayments(windowOf(week)).length
+    const failed = filterPayments({ ...windowOf(week), status: "failed" }).length
+    return { date: week.date, Approved: total - failed, Failed: failed }
   })
 }
 
 /** Share of payments that ended in a dispute, per week. */
 export function disputeRateByWeek(count = 12) {
   return weeks(count).map((week) => {
-    const inBucket = store.payments.filter((p) => inWeek(p.createdAt, week))
-    const disputed = inBucket.filter((p) => p.status === "disputed").length
+    const total = filterPayments(windowOf(week)).length
+    const disputed = filterPayments({
+      ...windowOf(week),
+      status: "disputed",
+    }).length
     return {
       date: week.date,
-      "Dispute rate": inBucket.length ? disputed / inBucket.length : 0,
+      "Dispute rate": total ? disputed / total : 0,
     }
   })
 }
@@ -104,19 +96,24 @@ export function disputeRateByWeek(count = 12) {
 export function merchantRollup() {
   return merchants
     .map((merchant) => {
-      const payments = store.payments.filter(
-        (p) => p.merchantId === merchant.id,
-      )
-      const captured = payments.filter((p) => p.status === "captured")
+      const payments = filterPayments({ merchantId: merchant.id })
+      const failed = filterPayments({
+        merchantId: merchant.id,
+        status: "failed",
+      }).length
       const disputes = store.disputes.filter(
         (d) => d.merchantId === merchant.id,
       )
-      const failed = payments.filter((p) => p.status === "failed").length
 
       return {
         merchant,
         payments: payments.length,
-        volume: captured.reduce((total, p) => total + p.amount, 0),
+        // A merchant's volume is in its own currency, not the reporting one.
+        volume: volumeFor({
+          merchantId: merchant.id,
+          status: "captured",
+          currency: merchant.currency,
+        }),
         disputes: disputes.length,
         authRate: payments.length
           ? (payments.length - failed) / payments.length

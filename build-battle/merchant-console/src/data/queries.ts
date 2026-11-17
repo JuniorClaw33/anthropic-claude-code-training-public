@@ -11,25 +11,47 @@ const STATUSES: readonly (PaymentStatus | "all")[] = [
   "disputed",
 ]
 
+const MAX_SEARCH_LENGTH = 100
+
+/** An ISO 8601 date, or a timestamp that says which timezone it is in. */
+const ISO_INSTANT =
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2}))?$/
+
+/**
+ * A client-supplied date, as a UTC ISO timestamp, or undefined when it is not
+ * a real ISO date. Rejecting everything else keeps `Date` from guessing at a
+ * local-time reading, and keeps the string comparison in `filterPayments`
+ * honest.
+ */
+function parseInstant(value: string | null): string | undefined {
+  if (!value || !ISO_INSTANT.test(value)) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
+}
+
 /**
  * Anything from the client is checked against an allowlist before it reaches
  * a query. Route handlers call this rather than reading params themselves.
+ * A value that fails its check is dropped, the way an unknown status already
+ * falls back to "all".
  */
 export function parseFilters(params: URLSearchParams): PaymentFilters {
   const status = params.get("status")
   const sort = params.get("sort")
   const direction = params.get("direction")
   const page = Number(params.get("page") ?? "1")
+  const merchantId = params.get("merchantId")
+  const search = params.get("search")
 
   return {
     status: STATUSES.includes(status as PaymentStatus)
       ? (status as PaymentStatus)
       : "all",
-    merchantId: params.get("merchantId") ?? undefined,
-    search: params.get("search") ?? undefined,
-    from: params.get("from") ?? undefined,
-    to: params.get("to") ?? undefined,
-    page: Number.isFinite(page) && page > 0 ? page : 1,
+    merchantId: merchantId && merchantById(merchantId) ? merchantId : undefined,
+    search: search ? search.slice(0, MAX_SEARCH_LENGTH) : undefined,
+    from: parseInstant(params.get("from")),
+    to: parseInstant(params.get("to")),
+    page: Number.isInteger(page) && page > 0 ? page : 1,
     sort: sort === "amount" ? "amount" : "createdAt",
     direction: direction === "asc" ? "asc" : "desc",
   }
@@ -43,12 +65,13 @@ export function parseFilters(params: URLSearchParams): PaymentFilters {
 export const PAGE_SIZE = 20
 
 export function filterPayments(filters: PaymentFilters): Payment[] {
-  const { status, merchantId, search, from, to } = filters
+  const { status, merchantId, currency, search, from, to } = filters
   const needle = search?.trim().toLowerCase()
 
   return store.payments.filter((payment) => {
     if (status && status !== "all" && payment.status !== status) return false
     if (merchantId && payment.merchantId !== merchantId) return false
+    if (currency && payment.currency !== currency) return false
     if (from && payment.createdAt < from) return false
     if (to && payment.createdAt > to) return false
 
@@ -77,8 +100,8 @@ export function sortPayments(
   const factor = direction === "asc" ? 1 : -1
   return [...payments].sort((a, b) => {
     if (sort === "amount") {
-      // Sort by the formatted amount so the order matches what the table shows.
-      return String(a.amount).localeCompare(String(b.amount)) * factor
+      // Amounts are integer minor units, so compare them as numbers.
+      return (a.amount - b.amount) * factor
     }
     return a.createdAt.localeCompare(b.createdAt) * factor
   })
