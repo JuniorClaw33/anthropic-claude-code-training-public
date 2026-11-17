@@ -25,6 +25,48 @@ export const EXPORT_COLUMNS = [
 
 export type ExportColumn = (typeof EXPORT_COLUMNS)[number]
 
+/**
+ * What ships when the caller does not choose. The card last four is left out:
+ * a file handed to a merchant should not carry it unless someone opts in.
+ */
+export const DEFAULT_EXPORT_COLUMNS: readonly ExportColumn[] =
+  EXPORT_COLUMNS.filter((column) => column !== "last4")
+
+export type ColumnSelection =
+  | { ok: true; columns: ExportColumn[] }
+  | { ok: false; error: string }
+
+/**
+ * Turns the `columns` query value into a validated column list.
+ *
+ * Column names come from the client, so each one is checked against
+ * EXPORT_COLUMNS. Nothing else ever reaches `toCsv`. An absent value means
+ * "the defaults"; a present but empty value is an empty selection and is
+ * rejected rather than producing an empty file.
+ */
+export function parseColumns(param: string | null | undefined): ColumnSelection {
+  if (param === null || param === undefined) {
+    return { ok: true, columns: [...DEFAULT_EXPORT_COLUMNS] }
+  }
+  if (param.trim() === "") {
+    return { ok: false, error: "Select at least one column." }
+  }
+
+  const requested = param.split(",").map((name) => name.trim())
+  const unknown = requested.filter(
+    (name) => !(EXPORT_COLUMNS as readonly string[]).includes(name),
+  )
+  if (unknown.length > 0) {
+    return { ok: false, error: `Unknown column: ${unknown.join(", ")}.` }
+  }
+
+  // Keep the order the caller asked for, and drop repeats.
+  return {
+    ok: true,
+    columns: [...new Set(requested)] as ExportColumn[],
+  }
+}
+
 function escapeCell(value: string): string {
   if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
   return value
@@ -66,6 +108,13 @@ export function toCsv(
   return [header, ...rows].join("\n")
 }
 
-export function exportFilename(date = new Date()): string {
-  return `payments-${date.toISOString().slice(0, 10)}.csv`
+/**
+ * `payments-2026-08-13.csv`, or `payments-disputed-2026-08-13.csv` when a
+ * label says what the scope was. The label is reduced to lowercase letters,
+ * digits and underscores, so it can never alter the header it ends up in.
+ */
+export function exportFilename(date = new Date(), label?: string): string {
+  const day = date.toISOString().slice(0, 10)
+  const safe = label?.toLowerCase().replace(/[^a-z0-9_]/g, "")
+  return safe ? `payments-${safe}-${day}.csv` : `payments-${day}.csv`
 }

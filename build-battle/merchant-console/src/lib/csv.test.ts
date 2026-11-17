@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { Payment } from "@/data/types"
-import { EXPORT_COLUMNS, exportFilename, toCsv } from "./csv"
+import {
+  DEFAULT_EXPORT_COLUMNS,
+  EXPORT_COLUMNS,
+  exportFilename,
+  parseColumns,
+  toCsv,
+} from "./csv"
 
 /**
  * The export is the file ops hands to a merchant, so a broken cell is a
@@ -81,5 +87,64 @@ describe("exportFilename", () => {
     expect(exportFilename(new Date("2026-03-14T23:00:00.000Z"))).toBe(
       "payments-2026-03-14.csv",
     )
+  })
+
+  it("puts the scope label before the date", () => {
+    expect(
+      exportFilename(new Date("2026-08-13T10:00:00.000Z"), "disputed"),
+    ).toBe("payments-disputed-2026-08-13.csv")
+  })
+
+  it("strips anything from the label that could alter the header", () => {
+    expect(
+      exportFilename(new Date("2026-08-13T10:00:00.000Z"), 'x"\r\nSet-Cookie: a'),
+    ).toBe("payments-xsetcookiea-2026-08-13.csv")
+  })
+})
+
+describe("column selection", () => {
+  it("returns a subset of columns in the order requested", () => {
+    const selection = parseColumns("amount,id,merchant")
+    expect(selection).toEqual({ ok: true, columns: ["amount", "id", "merchant"] })
+    if (!selection.ok) return
+    expect(toCsv([payment], selection.columns)).toBe(
+      ["amount,id,merchant", "$250.00,pay_0001,Lumen Coffee Roasters"].join("\n"),
+    )
+  })
+
+  it("leaves the card last four out by default", () => {
+    const selection = parseColumns(null)
+    expect(selection.ok).toBe(true)
+    if (!selection.ok) return
+    expect(selection.columns).not.toContain("last4")
+    expect(selection.columns).toEqual([...DEFAULT_EXPORT_COLUMNS])
+    expect(toCsv([payment], selection.columns)).not.toContain("4242")
+  })
+
+  it("includes the last four only when it is asked for", () => {
+    const selection = parseColumns("id,last4")
+    expect(selection).toEqual({ ok: true, columns: ["id", "last4"] })
+  })
+
+  it("rejects an empty selection instead of producing an empty file", () => {
+    expect(parseColumns("")).toEqual({
+      ok: false,
+      error: "Select at least one column.",
+    })
+    expect(parseColumns("  ").ok).toBe(false)
+  })
+
+  it("rejects a column that is not on the allowlist", () => {
+    const selection = parseColumns("id,password")
+    expect(selection.ok).toBe(false)
+    if (selection.ok) return
+    expect(selection.error).toContain("password")
+  })
+
+  it("drops repeated columns and keeps the first position", () => {
+    expect(parseColumns("id,amount,id")).toEqual({
+      ok: true,
+      columns: ["id", "amount"],
+    })
   })
 })
